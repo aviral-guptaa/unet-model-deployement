@@ -8,7 +8,7 @@ import tensorflow as tf
 from tensorflow import keras
 from PIL import Image
 from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import JSONResponse
 
 # --- Configuration ---
 IMG_HEIGHT = 64
@@ -69,34 +69,62 @@ def encode_image_to_base64(img_array):
 
 # --- FastAPI Endpoints ---
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/")
 async def read_root():
-    """Serves the main HTML page."""
-    html_content = ""
-    try:
-        with open("templates/index.html", "r") as f:
-            html_content = f.read()
-    except FileNotFoundError:
-        html_content = "<html><body><h1>Error</h1><p>index.html not found. Make sure it's in a 'templates' folder.</p></body></html>"
-    return HTMLResponse(content=html_content, status_code=200)
+    """Returns API information in JSON format."""
+    return JSONResponse(content={
+        "message": "Weed Segmentation API",
+        "version": "1.0",
+        "endpoints": {
+            "/": "API information (this page)",
+            "/predict": "POST endpoint for image segmentation",
+            "/health": "Health check endpoint"
+        },
+        "usage": {
+            "method": "POST",
+            "endpoint": "/predict",
+            "content_type": "multipart/form-data",
+            "parameters": {
+                "plant_image": "Plant image file for segmentation",
+                "mask_image": "Mask image file for reference"
+            }
+        }
+    })
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint to verify API and model status."""
+    return JSONResponse(content={
+        "status": "healthy" if model is not None else "unhealthy",
+        "model_loaded": model is not None,
+        "model_path": MODEL_PATH
+    })
 
 
 @app.post("/predict")
-async def predict(file: UploadFile = File(...)):
+async def predict(
+    plant_image: UploadFile = File(..., description="Plant image for segmentation"),
+    mask_image: UploadFile = File(..., description="Mask image for reference")
+):
     """
-    Handles image upload, runs segmentation, calculates class percentages,
-    and returns both percentages and the segmentation mask image.
+    Handles two image uploads (plant image and mask image), runs segmentation, 
+    calculates class percentages, and returns both percentages and the segmentation mask image.
     """
     if model is None:
         raise HTTPException(status_code=503, detail="Model is not loaded.")
         
     try:
-        # Read and preprocess the image
-        img_bytes = await file.read()
-        img_batch = preprocess_image(img_bytes)
+        # Read and preprocess the plant image
+        plant_bytes = await plant_image.read()
+        plant_batch = preprocess_image(plant_bytes)
+        
+        # Read and preprocess the mask image
+        mask_bytes = await mask_image.read()
+        mask_batch = preprocess_image(mask_bytes)
         
         # 2. Run prediction (gets a 64x64x3 probability map)
-        prediction = model.predict(img_batch) # Shape: (1, 64, 64, 3)
+        prediction = model.predict(plant_batch) # Shape: (1, 64, 64, 3)
         
         # 3. Post-process: Get 2D class mask (64x64)
         # This is the 64x64 array with values 0, 1, or 2 for each pixel
@@ -121,17 +149,20 @@ async def predict(file: UploadFile = File(...)):
         
         # 6. === Return both numbers and image ===
         return JSONResponse(content={
+            "success": True,
+            "plant_filename": plant_image.filename,
+            "mask_filename": mask_image.filename,
             "percentages": {
-                "healthy_area": (healthy_percentage),
-                "weed_area": (weed_percentage),
-                "soil_area": (soil_percentage)
+                "healthy_area": healthy_percentage,
+                "weed_area": weed_percentage,
+                "soil_area": soil_percentage
             },
-            "mask_image": mask_base64
+            "predicted_mask": mask_base64
         })
 
     except Exception as e:
         print(f"Error during prediction: {e}")
-        raise HTTPException(status_code=500, detail="Failed to process image.")
+        raise HTTPException(status_code=500, detail=f"Failed to process images: {str(e)}")
 
 # --- Run the App ---
 if __name__ == '__main__':
