@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weed Segmentation</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 20px; background: #f4f4f4; }
+        h1 { text-align: center; color: #333; }
+        .container { max-width: 1200px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); }
+        
+        /* Updated controls to stack inputs */
+        .controls { 
+            text-align: center; 
+            margin-bottom: 20px; 
+            border: 1px solid #ddd; 
+            padding: 15px; 
+            border-radius: 8px;
+        }
+        .controls div {
+            margin: 10px 0;
+            font-size: 1.1em;
+        }
+        .controls label {
+            font-weight: 500;
+            margin-right: 10px;
+        }
+        input[type="file"] { border: 1px solid #ccc; padding: 10px; border-radius: 4px; }
+        button { background: #007aff; color: white; padding: 12px 20px; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; margin-top: 10px; }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        
+        #results-container { text-align: center; margin: 20px auto; padding: 15px; background: #f9f9f9; border-radius: 8px; max-width: 300px; }
+        #results-container h3 { margin-top: 0; }
+        #percentageResults p { font-size: 1.1em; font-weight: 500; margin: 8px 0; }
+        #percentageResults p.healthy { color: green; }
+        #percentageResults p.weed { color: red; }
+        #percentageResults p.soil { color: #8B4513; }
+
+        /* Updated images to handle three boxes */
+        .images { display: flex; justify-content: space-around; margin-top: 20px; flex-wrap: wrap; }
+        .img-box { border: 2px dashed #ddd; padding: 10px; border-radius: 4px; text-align: center; width: 30%; min-width: 320px; min-height: 320px; margin: 10px; box-sizing: border-box; }
+        .img-box h3 { margin-top: 0; color: #555; }
+        .img-box img { max-width: 100%; max-height: 300px; object-fit: contain; background: #fafafa; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>🌱 Weed Segmentation Comparison</h1>
+        
+        <div class="controls">
+            <div>
+                <label for="imageUpload">1. Upload Plant Image:</label>
+                <input type="file" id="imageUpload" accept="image/*" onchange="showImagePreview(event)">
+            </div>
+            
+            <div>
+                <label for="maskUpload">2. Upload Ground Truth Mask:</label>
+                <input type="file" id="maskUpload" accept="image/*" onchange="showMaskPreview(event)">
+            </div>
+            
+            <button id="predictButton" onclick="predict()" disabled>Run Model Prediction</button>
+        </div>
+        
+        <div id="status" style="text-align: center; font-size: 18px; color: #007aff; height: 20px; margin-top: 15px;"></div>
+
+        <div id="results-container" style="display: none;">
+            <h3>📊 Model Prediction Results</h3>
+            <div id="percentageResults">
+                </div>
+        </div>
+
+        <div class="images">
+            <div class="img-box">
+                <h3>Original Image</h3>
+                <img id="imagePreview" src="" alt="Upload plant image here.">
+            </div>
+            <div class="img-box">
+                <h3>Ground Truth Mask</h3>
+                <img id="maskPreview" src="" alt="Upload mask image here.">
+            </div>
+            <div class="img-box">
+                <h3>Model Prediction</h3>
+                <img id="predictionResult" src="" alt="Model's prediction will appear here.">
+            </div>
+        </div>
+        
+        <div style="text-align: center; margin-top: 20px; color: #666;">
+            <b>Legend:</b> 
+            <span style="color: green; font-weight: bold;">■ Healthy</span> |
+            <span style="color: red; font-weight: bold;">■ Weed</span> |
+            <span style="color: #8B4513; font-weight: bold;">■ Soil</span>
+        </div>
+    </div>
+
+    <script>
+        const imageUpload = document.getElementById('imageUpload');
+        const maskUpload = document.getElementById('maskUpload');
+        
+        const imagePreview = document.getElementById('imagePreview');
+        const maskPreview = document.getElementById('maskPreview');
+        const predictionResult = document.getElementById('predictionResult');
+        
+        const predictButton = document.getElementById('predictButton');
+        const statusEl = document.getElementById('status');
+        const resultsContainer = document.getElementById('results-container');
+        const percentageResultsEl = document.getElementById('percentageResults');
+        
+        let plantImageFile = null; // Store the plant image file
+
+        // 1. Show preview for the PLANT image
+        function showImagePreview(event) {
+            if (event.target.files.length > 0) {
+                plantImageFile = event.target.files[0];
+                const src = URL.createObjectURL(plantImageFile);
+                imagePreview.src = src;
+                
+                // Clear previous results when new image is uploaded
+                predictionResult.src = "";
+                statusEl.textContent = "";
+                percentageResultsEl.innerHTML = "";
+                resultsContainer.style.display = 'none';
+                
+                // Enable the predict button
+                predictButton.disabled = false;
+            }
+        }
+        
+        // 2. Show preview for the MASK image
+        function showMaskPreview(event) {
+            if (event.target.files.length > 0) {
+                const src = URL.createObjectURL(event.target.files[0]);
+                maskPreview.src = src;
+            }
+        }
+
+        // 3. Send ONLY the plant image to the server for prediction
+        async function predict() {
+            if (!plantImageFile) {
+                alert("Please upload a plant image first.");
+                return;
+            }
+
+            // Show loading state and clear old results
+            predictButton.disabled = true;
+            statusEl.textContent = "Processing... this may take a moment.";
+            predictionResult.src = "";
+            percentageResultsEl.innerHTML = "";
+            resultsContainer.style.display = 'none';
+
+            const formData = new FormData();
+            formData.append('file', plantImageFile); // 'file' must match main.py
+
+            try {
+                // Send POST request to /predict
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Server error: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                // 1. Set the MODEL PREDICTION image
+                predictionResult.src = 'data:image/png;base64,' + data.mask_image;
+
+                // 2. Display percentages
+                const percentages = data.percentages;
+                percentageResultsEl.innerHTML = `
+                    <p class="healthy"><strong>Healthy:</strong> ${percentages.healthy_area.toFixed(2)}</p>
+                    <p class="weed"><strong>Weed:</strong> ${percentages.weed_area.toFixed(2)}</p>
+                    <p class="soil"><strong>Soil:</strong> ${percentages.soil_area.toFixed(2)}</p>
+                `;
+                resultsContainer.style.display = 'block'; // Show the results box
+
+                statusEl.textContent = "Done!";
+
+            } catch (error) {
+                console.error("Prediction failed:", error);
+                statusEl.textContent = `Error: ${error.message}`;
+                resultsContainer.style.display = 'none';
+            } finally {
+                // Re-enable button
+                predictButton.disabled = false;
+            }
+        }
+    </script>
+
+</body>
+</html>
