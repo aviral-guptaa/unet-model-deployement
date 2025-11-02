@@ -1,5 +1,6 @@
 numpy
 cv
+opencv-python
 uvicorn
 fastapi
 fastapi[standard]
