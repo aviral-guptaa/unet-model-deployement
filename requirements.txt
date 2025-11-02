@@ -2,7 +2,7 @@ numpy
 cv
 uvicorn
 fastapi
-"fastapi[standard]"
+fastapi[standard]
 pydantic
 tensorflow 
 pillow
